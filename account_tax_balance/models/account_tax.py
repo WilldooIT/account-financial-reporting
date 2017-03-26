@@ -3,66 +3,28 @@
 # © 2016 Antonio Espinosa <antonio.espinosa@tecnativa.com>
 # License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl).
 
-from openerp import models, fields, api
-from openerp.tools.safe_eval import safe_eval
+from openerp import models, fields, api, _
 
 
 class AccountTax(models.Model):
     _inherit = 'account.tax'
 
     balance = fields.Float(
-        string="Total Balance", compute="_compute_balance",
-        search='_search_balance')
+        string="Total Balance", compute="_compute_balance")
     base_balance = fields.Float(
-        string="Total Base Balance", compute="_compute_balance",
-        search='_search_base_balance')
+        string="Total Base Balance", compute="_compute_balance")
     balance_regular = fields.Float(
-        string="Balance", compute="_compute_balance",
-        search='_search_balance_regular')
+        string="Balance", compute="_compute_balance")
     base_balance_regular = fields.Float(
-        string="Base Balance", compute="_compute_balance",
-        search='_search_base_balance_regular')
+        string="Base Balance", compute="_compute_balance")
     balance_refund = fields.Float(
-        string="Balance Refund", compute="_compute_balance",
-        search='_search_balance_refund')
+        string="Balance Refund", compute="_compute_balance")
     base_balance_refund = fields.Float(
-        string="Base Balance Refund", compute="_compute_balance",
-        search='_search_base_balance_refund')
-
-    def _search_balance_field(self, field, operator, value):
-        operators = {'>', '<', '>=', '<=', '!=', '=', '<>'}
-        fields = {
-            'balance', 'base_balance', 'balance_regular',
-            'base_balance_regular', 'balance_refund', 'base_balance_refund',
-        }
-        domain = []
-        if operator in operators and field in fields:
-            value = float(value) if value else 0
-            taxes = self.search([]).filtered(
-                lambda x: safe_eval(
-                    '%.2f %s %.2f' % (x[field], operator, value)))
-            domain.append(('id', 'in', taxes.ids))
-        return domain
-
-    def _search_balance(self, operator, value):
-        return self._search_balance_field('balance', operator, value)
-
-    def _search_base_balance(self, operator, value):
-        return self._search_balance_field('base_balance', operator, value)
-
-    def _search_balance_regular(self, operator, value):
-        return self._search_balance_field('balance_regular', operator, value)
-
-    def _search_base_balance_regular(self, operator, value):
-        return self._search_balance_field(
-            'base_balance_regular', operator, value)
-
-    def _search_balance_refund(self, operator, value):
-        return self._search_balance_field('balance_refund', operator, value)
-
-    def _search_base_balance_refund(self, operator, value):
-        return self._search_balance_field(
-            'base_balance_refund', operator, value)
+        string="Base Balance Refund", compute="_compute_balance")
+    has_moves = fields.Boolean(
+        string="Has balance in period",
+        compute="_compute_has_moves",
+        search="_search_has_moves")
 
     def get_context_values(self):
         context = self.env.context
@@ -72,6 +34,52 @@ class AccountTax(models.Model):
             context.get('company_id', self.env.user.company_id.id),
             context.get('target_move', 'posted')
         )
+
+    def _account_tax_ids_with_moves(self):
+        """ Return all account.tax ids for which there is at least
+        one account.move.line in the context period
+        for the user company.
+
+        Caveat: this ignores record rules and ACL but it is good
+        enough for filtering taxes with activity during the period.
+        """
+        req = """
+            SELECT id
+            FROM account_tax at_zzz
+            WHERE
+            company_id = %s AND
+            EXISTS (
+              SELECT 1 FROM account_move_Line aml_zzz
+              WHERE
+                date >= %s AND
+                date <= %s AND
+                company_id = %s AND (
+                  tax_line_id = at_zzz.id OR
+                  EXISTS (
+                    SELECT 1 FROM account_move_line_account_tax_rel
+                    WHERE account_move_line_id = aml_zzz.id AND
+                      account_tax_id = at_zzz.id
+                  )
+                )
+            )
+        """
+        from_date, to_date, company_id, target_move = self.get_context_values()
+        self.env.cr.execute(
+            req, (company_id, from_date, to_date, company_id))
+        return [r[0] for r in self.env.cr.fetchall()]
+
+    @api.multi
+    def _compute_has_moves(self):
+        ids_with_moves = set(self._account_tax_ids_with_moves())
+        for tax in self:
+            tax.has_moves = tax.id in ids_with_moves
+
+    @api.model
+    def _search_has_moves(self, operator, value):
+        if operator != '=' or not value:
+            raise ValueError(_("Unsupported search operator"))
+        ids_with_moves = self._account_tax_ids_with_moves()
+        return [('id', 'in', ids_with_moves)]
 
     def _compute_balance(self):
         for tax in self:
