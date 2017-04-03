@@ -409,11 +409,15 @@ class KpiMatrix(object):
         yields KpiMatrixRow.
         """
         for kpi_row in self._kpi_rows.values():
-            yield kpi_row
+            if not kpi_row.kpi.auto_expand_accounts_before_kpi:
+                yield kpi_row
             detail_rows = self._detail_rows[kpi_row.kpi].values()
             detail_rows = sorted(detail_rows, key=lambda r: r.description)
             for detail_row in detail_rows:
                 yield detail_row
+            if kpi_row.kpi.auto_expand_accounts_before_kpi:
+                yield kpi_row
+
 
     def iter_cols(self):
         """ Iterate columns in display order.
@@ -548,6 +552,7 @@ class MisReportKpi(models.Model):
         copy=True,
     )
     auto_expand_accounts = fields.Boolean(string='Display details by account')
+    auto_expand_accounts_before_kpi = fields.Boolean(string='Display details before KPI')
     auto_expand_accounts_style_id = fields.Many2one(
         string="Style for account detail rows",
         comodel_name="mis.report.style",
