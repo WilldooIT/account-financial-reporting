@@ -411,7 +411,7 @@ class KpiMatrix(object):
         for kpi_row in self._kpi_rows.values():
             yield kpi_row
             detail_rows = self._detail_rows[kpi_row.kpi].values()
-            detail_rows = sorted(detail_rows, key=lambda r: r.description)
+            detail_rows = sorted(detail_rows, key=lambda r: self.get_account_name(r.account_id) if r.account_id else r.description)
             for detail_row in detail_rows:
                 yield detail_row
 
