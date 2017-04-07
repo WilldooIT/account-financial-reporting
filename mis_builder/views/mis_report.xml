@@ -125,8 +125,9 @@
                         <field name="auto_expand_accounts"/>
                         <field name="auto_expand_accounts_style_id"
                                attrs="{'invisible': [('auto_expand_accounts', '!=', True)]}"/>
-                        <field name="auto_expand_accounts_before_kpi"
-                               attrs="{'invisible': [('auto_expand_accounts', '!=', True)]}"/>
+                        <field name="auto_expand_accounts_kpi_position"
+                               attrs="{'invisible': [('auto_expand_accounts', '!=', True)],
+                                       'required': [('auto_expand_accounts', '=', True)],}"/>
                     </group>
                     <group col="2" string="Legend (for kpi expressions)">
                         <group>
