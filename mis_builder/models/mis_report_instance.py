@@ -330,11 +330,36 @@ class MisReportInstance(models.Model):
                        string='Name', translate=True)
     description = fields.Char(related='report_id.description',
                               readonly=True)
-    date_format = fields.Char(string="Date Format")
+    date_format = fields.Char(
+                    string="Date Format",
+                    help="Leave blank for users default date format.\n"
+                         "For custom date format use %X format chars,\n"
+                         "e.g. '%d/%m/%Y' for 31/12/2017.\n"
+                         "Supported format chars are:\n"
+                         "   %a - Abbreviated weekday name.\n"
+                         "   %A - Full weekday name.\n"
+                         "   %b - Abbreviated month name.\n"
+                         "   %B - Full month name.\n"
+                         "   %d - Day of the month [01,31].\n"
+                         "   %j - Day of the year [001,366].\n"
+                         "   %m - Month number [01,12].\n"
+                         "   %w - Weekday number [0(Sunday),6].\n"
+                         "   %y - Year without century [00,99].\n"
+                         "   %Y - Year with century.")
     description_format_single = fields.Char(
-                                    string="Description Format Single Date")
+        string="Description Format Single Date",
+        help="Column description when 'from' and 'to' dates are the same.\n"
+             "Leave blank for default description.\n"
+             "For custom description enter the required description using"
+             "<<from>> and <<to>> to place the 'from' and/or 'to' dates. "
+             "e.g.:\n    From <<from>>")
     description_format_range = fields.Char(
-                                    string="Description Format Date Range")
+        string="Description Format Date Range",
+        help="Column description when 'from' and 'to' dates are different.\n"
+             "Leave blank for default description.\n"
+             "For custom description enter the required description using"
+             "<<from>> and <<to>> to place the 'from' and/or 'to' dates. "
+             "e.g.:\n    From <<from>> to <<to>>")
     date = fields.Date(string='Base date',
                        help='Report base date '
                             '(leave empty to use current date)')
