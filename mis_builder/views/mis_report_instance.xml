@@ -70,11 +70,13 @@
                             <field name="comparison_mode"/>
                         </group>
                         <group>
-                            <group name="simple_mode"
-                                   attrs="{'invisible': [('comparison_mode', '=', True)]}" colspan="4">
-                                <field name="date_range_id"/>
-                                <field name="date_from" attrs="{'required': [('comparison_mode', '=', False)]}"/>
-                                <field name="date_to" attrs="{'required': [('comparison_mode', '=', False)]}"/>
+                            <group name="simple_mode" colspan="4">
+                                <field name="date_range_id" attrs="{'invisible': [('comparison_mode', '=', True)]}"/>
+                                <field name="date_from" attrs="{'invisible': [('comparison_mode', '=', True)], 'required': [('comparison_mode', '=', False)]}"/>
+                                <field name="date_to" attrs="{'invisible': [('comparison_mode', '=', True)], 'required': [('comparison_mode', '=', False)]}"/>
+                                <field name="date_format"/>
+                                <field name="description_format_single"/>
+                                <field name="description_format_range"/>
                             </group>
                         </group>
                     </group>
