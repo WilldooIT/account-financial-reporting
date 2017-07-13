@@ -13,7 +13,7 @@ import time
 import pytz
 
 from odoo import api, fields, models, _
-from odoo.exceptions import UserError
+from odoo.exceptions import UserError, ValidationError
 from odoo.tools.safe_eval import safe_eval
 
 from .aep import AccountingExpressionProcessor as AEP
@@ -33,6 +33,53 @@ _logger = logging.getLogger(__name__)
 KPOS_ABOVE = 'above'
 KPOS_BELOW = 'below'
 KPOS_NONE = 'none'
+
+
+PARAM_START = '<<'
+PARAM_END = '>>'
+
+PARAM_TYPE_NUM = 'num'
+PARAM_TYPE_STR = 'str'
+PARAM_TYPE_REF = 'ref'
+
+
+def substitute_params(expr, param_vals):
+    """Substitute report parameter values into an expression string.
+
+    The parameters are indicated in the expression by the parameter
+    name delimited by the parameter start/end tags, e.g.:
+        <<my_param>>
+
+    :param expr: The expression string to substitute into.
+    :param param_vals: Dict with parameter values.
+    """
+    new_expr = expr
+    while param_vals:
+        spos = new_expr.find(PARAM_START)
+        if spos < 0:
+            break
+        epos = new_expr.find(PARAM_END, spos)
+        if epos < 0:
+            raise UserError(_("Malformed expression. "
+                              "Closing parameter tag '%s' "
+                              "not found in: '%s'.") %
+                            (PARAM_END, expr))
+        if epos < spos:
+            raise UserError(_("Malformed expression. "
+                              "Closing parameter tag '%s' "
+                              "found before starting tag '%s' "
+                              "in : '%s'.") %
+                            (PARAM_END, PARAM_START, expr))
+        pname = new_expr[spos + len(PARAM_START):epos]
+        if pname not in param_vals:
+            raise UserError(_("No value provided for parameter '%s' "
+                              "used in expression: '%s'.") %
+                            (pname, expr))
+        new_expr = "%s%s%s" % (new_expr[:spos],
+                               param_vals[pname],
+                               new_expr[epos+len(PARAM_END):])
+
+    return new_expr
 
 
 class AutoStruct(object):
@@ -272,7 +319,7 @@ class KpiMatrix(object):
                 else:
                     val_comment = u'{} = {}'.format(
                         row.kpi.name,
-                        row.kpi.expression)
+                        row.kpi.param_subst_expression)
             cell_style_props = row.style_props
             if row.kpi.style_expression:
                 # evaluate style expression
@@ -557,6 +604,9 @@ class MisReportKpi(models.Model):
     expression = fields.Char(
         compute='_compute_expression',
         inverse='_inverse_expression')
+    param_subst_expression = fields.Char(
+        string='Expression with Substituted Parameters',
+        compute='_compute_param_subst_expression')
     expression_ids = fields.One2many(
         comodel_name='mis.report.kpi.expression',
         inverse_name='kpi_id',
@@ -651,6 +701,21 @@ class MisReportKpi(models.Model):
             kpi.expression = ',\n'.join(l)
 
     @api.multi
+    @api.depends('expression_ids.subkpi_id.name', 'expression_ids.name')
+    def _compute_param_subst_expression(self):
+        for kpi in self:
+            l = []
+            for expression in kpi.expression_ids:
+                if expression.subkpi_id:
+                    l.append(u'{}\xa0=\xa0{}'.format(
+                        expression.subkpi_id.name,
+                        expression.param_subst_name))
+                else:
+                    l.append(
+                        expression.param_subst_name or 'AccountingNone')
+            kpi.param_subst_expression = ',\n'.join(l)
+
+    @api.multi
     def _inverse_expression(self):
         for kpi in self:
             if kpi.multi:
@@ -706,7 +771,7 @@ class MisReportKpi(models.Model):
 
     def _get_expression_str_for_subkpi(self, subkpi):
         e = self._get_expression_for_subkpi(subkpi)
-        return e and e.name or ''
+        return e and e.param_subst_name or ''
 
     def _get_expression_for_subkpi(self, subkpi):
         for expression in self.expression_ids:
@@ -783,6 +848,9 @@ class MisReportKpiExpression(models.Model):
         store=True,
         readonly=True)
     name = fields.Char(string='Expression')
+    param_subst_name = fields.Char(
+        string='Expression with Substituted Parameters',
+        compute="_compute_param_subst_name")
     kpi_id = fields.Many2one(
         'mis.report.kpi', required=True, ondelete='cascade')
     # TODO FIXME set readonly=True when onchange('subkpi_ids') below works
@@ -795,6 +863,12 @@ class MisReportKpiExpression(models.Model):
         ('subkpi_kpi_unique', 'unique(subkpi_id, kpi_id)',
          'Sub KPI must be used once and only once for each KPI'),
     ]
+
+    @api.multi
+    def _compute_param_subst_name(self):
+        param_vals = self._context.get('mis_param_vals')
+        for expr in self:
+            expr.param_subst_name = substitute_params(expr.name, param_vals)
 
     @api.multi
     def name_get(self):
@@ -873,6 +947,64 @@ class MisReportQuery(models.Model):
                                   'identifier'))
 
 
+class MisReportParam(models.Model):
+    """ A MIS report parameter.
+
+    Each record in this model defines parameters available to be used
+    with an mis.report template.
+
+    Parameter values are stored against each report instance on
+    model mis.report.instance.param.value
+    """
+    _name = 'mis.report.param'
+    _order = "sequence"
+
+    report_id = fields.Many2one('mis.report', string='Report',
+                                required=True,
+                                ondelete='cascade')
+    name = fields.Char(required=True, string='Name', translate=True)
+    sequence = fields.Integer(string='Sequence', default=100)
+    type = fields.Selection([(PARAM_TYPE_NUM, _('Numeric')),
+                             (PARAM_TYPE_STR, _('String')),
+                             (PARAM_TYPE_REF, _('Reference'))],
+                            required=True,
+                            default=PARAM_TYPE_STR)
+    ref_model_id = fields.Many2one('ir.model', string="Model")
+    ref_search_field_id = fields.Many2one(
+                            'ir.model.fields',
+                            string="Parameter Value Field",
+                            domain="[('model_id', '=', ref_model_id)]")
+    ref_value_field_id = fields.Many2one(
+                            'ir.model.fields',
+                            string="Expression Value Field",
+                            domain="[('model_id', '=', ref_model_id)]")
+
+    @api.multi
+    @api.constrains('type', 'ref_model_id', 'ref_search_field_id', 'ref_value_field_id')
+    def _constrain_ref(self):
+        for param in self:
+            if param.type != 'ref':
+                continue
+            if not param.ref_model_id:
+                raise ValidationError(_("Model is required."))
+            if not param.ref_search_field_id:
+                raise ValidationError(_("Search field is required."))
+            if not param.ref_value_field_id:
+                raise ValidationError(_("Value field is required."))
+            if param.ref_search_field_id.model_id != param.ref_model_id:
+                raise ValidationError(
+                        _("Search field must be a field of the Model."))
+            if param.ref_value_field_id.model_id != param.ref_model_id:
+                raise ValidationError(
+                        _("Value field must be a field of the Model."))
+
+
+    @api.onchange('ref_model_id')
+    def onchange_ref_model_id(self):
+        self.ref_search_field_id = False
+        self.ref_value_field_id = False
+
+
 class MisReport(models.Model):
     """ A MIS report template (without period information)
 
@@ -904,6 +1036,9 @@ class MisReport(models.Model):
     subkpi_ids = fields.One2many('mis.report.subkpi', 'report_id',
                                  string="Sub KPI",
                                  copy=True)
+    param_ids = fields.One2many('mis.report.param', 'report_id',
+                                string="Parameters",
+                                copy=True)
 
     @api.onchange('subkpi_ids')
     def _on_change_subkpi_ids(self):
@@ -982,7 +1117,7 @@ class MisReport(models.Model):
         for kpi in self.kpi_ids:
             for expression in kpi.expression_ids:
                 if expression.name:
-                    aep.parse_expr(expression.name)
+                    aep.parse_expr(expression.param_subst_name)
         aep.done_parsing()
         return aep
 
@@ -1001,6 +1136,7 @@ class MisReport(models.Model):
     def _fetch_queries(self, date_from, date_to,
                        get_additional_query_filter=None):
         self.ensure_one()
+        param_vals = self._context.get('mis_param_vals')
         res = {}
         for query in self.query_ids:
             model = self.env[query.model_id.model]
@@ -1014,7 +1150,10 @@ class MisReport(models.Model):
                 'context': self.env.context,
             }
             domain = query.domain and \
-                safe_eval(query.domain, eval_context) or []
+                safe_eval(substitute_params(query.domain, param_vals),
+                          eval_context) or \
+                []
+
             if get_additional_query_filter:
                 domain.extend(get_additional_query_filter(query))
             if query.date_field.ttype == 'date':
@@ -1213,7 +1352,7 @@ class MisReport(models.Model):
                        aml_model)
 
         def eval_expressions(expressions, locals_dict):
-            expressions = [e and e.name or 'AccountingNone'
+            expressions = [e and e.param_subst_name or 'AccountingNone'
                            for e in expressions]
             vals = []
             drilldown_args = []
@@ -1236,7 +1375,7 @@ class MisReport(models.Model):
             return vals, drilldown_args, name_error
 
         def eval_expressions_by_account(expressions, locals_dict):
-            expressions = [e and e.name or 'AccountingNone'
+            expressions = [e and e.param_subst_name or 'AccountingNone'
                            for e in expressions]
             for account_id, replaced_exprs in \
                     aep.replace_exprs_by_account_id(expressions):
@@ -1259,3 +1398,14 @@ class MisReport(models.Model):
         self._declare_and_compute_col(
             kpi_matrix, col_key, col_label, col_description, subkpis_filter,
             locals_dict, eval_expressions, eval_expressions_by_account)
+
+    @api.multi
+    def write(self, values):
+        res = super(MisReport, self).write(values)
+
+        if 'param_ids' in values:
+            for instance in self.env['mis.report.instance'].\
+                            search([('report_id', 'in', self.ids)]):
+                instance._synch_params()
+
+        return res
