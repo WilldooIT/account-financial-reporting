@@ -70,13 +70,26 @@
                             <field name="comparison_mode"/>
                         </group>
                         <group>
-                            <group name="simple_mode"
-                                   attrs="{'invisible': [('comparison_mode', '=', True)]}" colspan="4">
-                                <field name="date_range_id"/>
-                                <field name="date_from" attrs="{'required': [('comparison_mode', '=', False)]}"/>
-                                <field name="date_to" attrs="{'required': [('comparison_mode', '=', False)]}"/>
+                            <group name="simple_mode" colspan="4">
+                                <field name="date_range_id" attrs="{'invisible': [('comparison_mode', '=', True)]}"/>
+                                <field name="date_from" attrs="{'invisible': [('comparison_mode', '=', True)], 'required': [('comparison_mode', '=', False)]}"/>
+                                <field name="date_to" attrs="{'invisible': [('comparison_mode', '=', True)], 'required': [('comparison_mode', '=', False)]}"/>
+                                <field name="date_format"/>
+                                <field name="description_format_single"/>
+                                <field name="description_format_range"/>
                             </group>
                         </group>
+                    </group>
+                    <group name="parameters" string="Parameters"
+                           attrs="{'invisible': [('param_value_count', '=', 0)]}" colspan="4">
+                        <field name="param_value_count" invisible="1"/>
+                        <field name="param_value_ids" colspan="4" nolabel="1">
+                            <tree create="false" delete="false">
+                                <field name="name"/>
+                                <field name="type"/>
+                                <field name="val_display"/>
+                            </tree>
+                        </field>
                     </group>
                     <group name="comparison_mode" string="Columns"
                            attrs="{'invisible': [('comparison_mode', '=', False)]}" colspan="4">
@@ -229,5 +242,27 @@
             </field>
         </record>
 
+        <record model="ir.ui.view" id="mis_report_instance_param_value_view_form">
+            <field name="name">mis.report.instance.param.value.view.form</field>
+            <field name="model">mis.report.instance.param.value</field>
+            <field name="priority" eval="16"/>
+            <field name="arch" type="xml">
+                <form>
+                    <group>
+                        <field name="name"/>
+                        <label for="type"/>
+                        <div name="div_type">
+                            <field name="type" class="oe_inline"/>
+                            <field name="ref_description" class="oe_inline"
+                                   attrs="{'invisible': [('type', '!=', 'ref')]}"/>
+                        </div>
+                        <field name="val_str" attrs="{'invisible': [('type', '!=', 'str')]}"/>
+                        <field name="val_num" attrs="{'invisible': [('type', '!=', 'num')]}"/>
+                        <field name="val_ref" attrs="{'invisible': [('type', '!=', 'ref')]}"/>
+                        <field name="val_display" invisible="1"/> <!-- Present so value updates on tree view when form is closed. -->
+                    </group>
+                </form>
+            </field>
+       </record>
     </data>
 </odoo>

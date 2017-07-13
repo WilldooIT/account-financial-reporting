@@ -307,6 +307,82 @@ class MisReportInstancePeriod(models.Model):
                       "in %s") % self.name)
 
 
+class MisReportInstanceParamValue(models.Model):
+    """ A MIS report instance parameter value has the value assigned
+    to a report parameter for a specific report instance.
+
+    The parameters are defined on the report template in model mis.report.param
+    """
+    _name = 'mis.report.instance.param.value'
+    _order = "sequence"
+
+    report_instance_id = fields.Many2one(comodel_name='mis.report.instance',
+                                         string='Report Instance',
+                                         required=True,
+                                         ondelete='cascade')
+    report_param_id = fields.Many2one('mis.report.param',
+                                      string="Parameter",
+                                      required=True,
+                                      readonly=True,
+                                      ondelete='cascade')
+    type = fields.Selection(related="report_param_id.type", readonly=True)
+    name = fields.Char(related="report_param_id.name", readonly=True)
+    sequence = fields.Integer(related="report_param_id.sequence", store=True, readonly=True)
+    ref_description = fields.Char(compute="_compute_ref_description")
+    val_display=fields.Char(string="Value", compute="_compute_val_display")
+    val_str = fields.Char(string="Value")
+    val_num = fields.Float(string="Value")
+    val_ref = fields.Char("Value")
+
+    @api.multi
+    @api.depends('val_str', 'val_num')
+    def _compute_val_display(self):
+        for pv in self:
+            if pv.type == 'str':
+                pv.val_display = pv.val_str
+            elif pv.type == 'num':
+                pv.val_display = str(pv.val_num)
+            elif pv.type == 'ref':
+                pv.val_display = pv.val_ref
+            else:
+                raise UserError(_("Unsupported parameter type: '%s'.") % pv.type)
+
+    @api.multi
+    def _compute_ref_description(self):
+        for pv in self:
+            if pv.type != 'ref':
+                pv.ref_description = False
+            else:
+                param = pv.report_param_id
+                pv.ref_description = \
+                    ": to %s found by value %s" % \
+                    (param.ref_model_id.name,
+                     param.ref_search_field_id.field_description)
+
+    @api.multi
+    def _value(self):
+        self.ensure_one()
+        if self.type == 'str':
+            return self.val_str
+        elif self.type == 'num':
+            return self.val_num
+        elif self.type == 'ref':
+            param = self.report_param_id
+            refs = self.env[param.ref_model_id.model].search(
+                        [(param.ref_search_field_id.name, '=', self.val_ref)])
+            if not refs:
+                raise UserError(_("Parameter '%s' error. "
+                                  "Can't find any %s records "
+                                  "with %s equal to '%s'.") %
+                                (self.name,
+                                 param.ref_model_id.name,
+                                 param.ref_search_field_id.field_description,
+                                 self.val_ref))
+            return refs[0][param.ref_value_field_id.name]
+        else:
+            raise UserError(_("Unsupported parameter type: '%s'.") % pv.type)
+
+
 class MisReportInstance(models.Model):
     """The MIS report instance combines everything to compute
     a MIS report template for a set of periods."""
@@ -319,6 +395,11 @@ class MisReportInstance(models.Model):
             else:
                 record.pivot_date = fields.Date.context_today(record)
 
+    @api.multi
+    def _compute_param_value_count(self):
+        for record in self:
+            record.param_value_count = len(record.param_value_ids)
+
     @api.model
     def _default_company(self):
         return self.env['res.company'].\
@@ -330,6 +411,36 @@ class MisReportInstance(models.Model):
                        string='Name', translate=True)
     description = fields.Char(related='report_id.description',
                               readonly=True)
+    date_format = fields.Char(
+                    string="Date Format",
+                    help="Leave blank for users default date format.\n"
+                         "For custom date format use %X format chars,\n"
+                         "e.g. '%d/%m/%Y' for 31/12/2017.\n"
+                         "Supported format chars are:\n"
+                         "   %a - Abbreviated weekday name.\n"
+                         "   %A - Full weekday name.\n"
+                         "   %b - Abbreviated month name.\n"
+                         "   %B - Full month name.\n"
+                         "   %d - Day of the month [01,31].\n"
+                         "   %j - Day of the year [001,366].\n"
+                         "   %m - Month number [01,12].\n"
+                         "   %w - Weekday number [0(Sunday),6].\n"
+                         "   %y - Year without century [00,99].\n"
+                         "   %Y - Year with century.")
+    description_format_single = fields.Char(
+        string="Description Format Single Date",
+        help="Column description when 'from' and 'to' dates are the same.\n"
+             "Leave blank for default description.\n"
+             "For custom description enter the required description using"
+             "<<from>> and <<to>> to place the 'from' and/or 'to' dates. "
+             "e.g.:\n    From <<from>>")
+    description_format_range = fields.Char(
+        string="Description Format Date Range",
+        help="Column description when 'from' and 'to' dates are different.\n"
+             "Leave blank for default description.\n"
+             "For custom description enter the required description using"
+             "<<from>> and <<to>> to place the 'from' and/or 'to' dates. "
+             "e.g.:\n    From <<from>> to <<to>>")
     date = fields.Date(string='Base date',
                        help='Report base date '
                             '(leave empty to use current date)')
@@ -338,6 +449,12 @@ class MisReportInstance(models.Model):
     report_id = fields.Many2one('mis.report',
                                 required=True,
                                 string='Report')
+    param_value_ids = fields.One2many(
+                          comodel_name='mis.report.instance.param.value',
+                          inverse_name='report_instance_id',
+                          string='Parameters',
+                          copy=True)
+    param_value_count = fields.Integer(compute="_compute_param_value_count")
     period_ids = fields.One2many(comodel_name='mis.report.instance.period',
                                  inverse_name='report_instance_id',
                                  required=True,
@@ -394,11 +511,16 @@ class MisReportInstance(models.Model):
         default['name'] = _('%s (copy)') % self.name
         return super(MisReportInstance, self).copy(default)
 
+    @api.multi
     def _format_date(self, date):
+        self.ensure_one()
+
         # format date following user language
-        lang_model = self.env['res.lang']
-        lang = lang_model._lang_get(self.env.user.lang)
-        date_format = lang.date_format
+        date_format = self.date_format
+        if not self.date_format:
+            lang_model = self.env['res.lang']
+            lang = lang_model._lang_get(self.env.user.lang)
+            date_format = lang.date_format
         return datetime.datetime.strftime(
             fields.Date.from_string(date), date_format)
 
@@ -471,6 +593,7 @@ class MisReportInstance(models.Model):
     @api.multi
     def export_xls(self):
         self.ensure_one()
+        self = self.with_context(mis_param_vals=self._param_vals())
         return {
             'name': 'MIS report instance XLSX report',
             'model': 'mis.report.instance',
@@ -563,6 +686,46 @@ class MisReportInstance(models.Model):
             return self._add_column_cmpcol(
                 aep, kpi_matrix, period, label, description)
 
+
+    @api.model
+    def _subst_description_dates(self, description_format, date_from, date_to):
+        description = description_format
+        for tag, val in (('<<from>>', date_from), ('<<to>>', date_to)):
+            description = description.replace(tag, val)
+        return description
+
+    @api.multi
+    def _param_vals(self):
+        """Return dict with parameter values for this report instance.
+        """
+        self.ensure_one()
+        return {pv.name: pv._value() for pv in self.param_value_ids}
+
+    @api.multi
+    def _synch_params(self):
+        """Synch parameter values with params defined on report template.
+
+        This method doesn't set the actual values, it just ensures that the
+        parameter values on the report match the parameters defined on the
+        report template.
+        """
+        self.ensure_one()
+
+        # We only need to add param value records for missing params.
+        # Delete of param values is handled by ondelete='cascade' on
+        # mis.report.instance.param.value
+        new_param_vals = []
+        for param in self.report_id.param_ids:
+            if self.param_value_ids.filtered(
+                    lambda pv: pv.report_param_id == param):
+                continue
+            new_param_vals.append({
+                'report_param_id': param.id,
+            })
+        if new_param_vals:
+            self.write(
+                {'param_value_ids': [(0, 0, pv) for pv in new_param_vals]})
+
     @api.multi
     def _compute_matrix(self):
         self.ensure_one()
@@ -570,14 +733,30 @@ class MisReportInstance(models.Model):
         kpi_matrix = self.report_id.prepare_kpi_matrix()
         for period in self.period_ids:
             description = None
+            date_from = period.date_from and \
+                        self._format_date(period.date_from) or \
+                        ''
+            date_to = period.date_to and \
+                      self._format_date(period.date_to) or \
+                      ''
             if period.mode == MODE_NONE:
                 pass
             elif period.date_from == period.date_to and period.date_from:
-                description = self._format_date(period.date_from)
+                if self.description_format_single:
+                    description = self._subst_description_dates(
+                                    self.description_format_single,
+                                    date_from,
+                                    date_to)
+                else:
+                    description = self._format_date(period.date_from)
             elif period.date_from and period.date_to:
-                date_from = self._format_date(period.date_from)
-                date_to = self._format_date(period.date_to)
-                description = _('from %s to %s') % (date_from, date_to)
+                if self.description_format_range:
+                    description = self._subst_description_dates(
+                                    self.description_format_range,
+                                    date_from,
+                                    date_to)
+                else:
+                    description = _('from %s to %s') % (date_from, date_to)
             self._add_column(aep, kpi_matrix, period, period.name, description)
         kpi_matrix.compute_comparisons()
         kpi_matrix.compute_sums()
@@ -586,6 +765,7 @@ class MisReportInstance(models.Model):
     @api.multi
     def compute(self):
         self.ensure_one()
+        self = self.with_context(mis_param_vals=self._param_vals())
         kpi_matrix = self._compute_matrix()
         return kpi_matrix.as_dict()
 

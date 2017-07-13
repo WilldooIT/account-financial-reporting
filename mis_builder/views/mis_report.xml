@@ -24,6 +24,18 @@
                         <field name="description"/>
                         <field name="style_id"/>
                     </group>
+                    <group string="Parameters">
+                         <field name="param_ids" nolabel="1" colspan="2" context="{'default_report_id': id}">
+                            <tree string="Parameters">
+                                <field name="sequence" widget="handle"/>
+                                <field name="name"/>
+                                <field name="type"/>
+                                <field name="ref_model_id"/>
+                                <field name="ref_search_field_id"/>
+                                <field name="ref_value_field_id"/>
+                            </tree>
+                        </field>
+                    </group>
                     <group string="Sub KPI's">
                          <field name="subkpi_ids" nolabel="1" colspan="2">
                             <tree string="Sub KPI's" editable="bottom">
@@ -125,6 +137,9 @@
                         <field name="auto_expand_accounts"/>
                         <field name="auto_expand_accounts_style_id"
                                attrs="{'invisible': [('auto_expand_accounts', '!=', True)]}"/>
+                        <field name="auto_expand_accounts_kpi_position"
+                               attrs="{'invisible': [('auto_expand_accounts', '!=', True)],
+                                       'required': [('auto_expand_accounts', '=', True)],}"/>
                     </group>
                     <group col="2" string="Legend (for kpi expressions)">
                         <group>
@@ -154,6 +169,31 @@
                         </group>
                     </group>
 
+                </form>
+            </field>
+        </record>
+
+        <record id="mis_report_view_param_form" model="ir.ui.view">
+            <field name="name">mis.report.view.param.form</field>
+            <field name="model">mis.report.param</field>
+            <field name="arch" type="xml">
+                <form string="MIS Report Parameter" version="7.0">
+                    <group col="4">
+                        <field name="name"/>
+                        <field name="type"/>
+                        <field name="report_id" invisible="1"/>
+                    </group>
+                    <group string="Reference" attrs="{'invisible': [('type', '!=', 'ref')]}">
+                        <field name="ref_model_id"
+                               attrs="{'required': [('type', '=', 'ref')]}"
+                               options="{'no_create': True, 'no_open': True}"/>
+                        <field name="ref_search_field_id"
+                               attrs="{'required': [('type', '=', 'ref')]}"
+                               options="{'no_create': True, 'no_open': True}"/>
+                        <field name="ref_value_field_id"
+                               attrs="{'required': [('type', '=', 'ref')]}"
+                               options="{'no_create': True, 'no_open': True}"/>
+                    </group>
                 </form>
             </field>
         </record>
