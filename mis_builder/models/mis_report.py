@@ -30,6 +30,10 @@ from .mis_kpi_data import (
 
 _logger = logging.getLogger(__name__)
 
+KPOS_ABOVE = 'above'
+KPOS_BELOW = 'below'
+KPOS_NONE = 'none'
+
 
 class AutoStruct(object):
 
@@ -409,11 +413,22 @@ class KpiMatrix(object):
         yields KpiMatrixRow.
         """
         for kpi_row in self._kpi_rows.values():
-            yield kpi_row
+            above = \
+                (not kpi_row.kpi.auto_expand_accounts) or \
+                (kpi_row.kpi.auto_expand_accounts_kpi_position in (KPOS_ABOVE,
+                                                                   False))
+            below = \
+                kpi_row.kpi.auto_expand_accounts and \
+                (kpi_row.kpi.auto_expand_accounts_kpi_position == KPOS_BELOW)
+
+            if above:
+                yield kpi_row
             detail_rows = self._detail_rows[kpi_row.kpi].values()
             detail_rows = sorted(detail_rows, key=lambda r: self.get_account_name(r.account_id) if r.account_id else r.description)
             for detail_row in detail_rows:
                 yield detail_row
+            if below:
+                yield kpi_row
 
     def iter_cols(self):
         """ Iterate columns in display order.
@@ -548,6 +563,13 @@ class MisReportKpi(models.Model):
         copy=True,
     )
     auto_expand_accounts = fields.Boolean(string='Display details by account')
+    auto_expand_accounts_kpi_position = fields.Selection(
+        [(KPOS_ABOVE, _('Above account details')),
+         (KPOS_BELOW, _('Below account details')),
+         (KPOS_NONE, _('Hide KPI row')),
+        ],
+        string='Display KPI row',
+        default=KPOS_ABOVE)
     auto_expand_accounts_style_id = fields.Many2one(
         string="Style for account detail rows",
         comodel_name="mis.report.style",
