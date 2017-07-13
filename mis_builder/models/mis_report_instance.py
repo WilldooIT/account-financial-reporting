@@ -330,6 +330,36 @@ class MisReportInstance(models.Model):
                        string='Name', translate=True)
     description = fields.Char(related='report_id.description',
                               readonly=True)
+    date_format = fields.Char(
+                    string="Date Format",
+                    help="Leave blank for users default date format.\n"
+                         "For custom date format use %X format chars,\n"
+                         "e.g. '%d/%m/%Y' for 31/12/2017.\n"
+                         "Supported format chars are:\n"
+                         "   %a - Abbreviated weekday name.\n"
+                         "   %A - Full weekday name.\n"
+                         "   %b - Abbreviated month name.\n"
+                         "   %B - Full month name.\n"
+                         "   %d - Day of the month [01,31].\n"
+                         "   %j - Day of the year [001,366].\n"
+                         "   %m - Month number [01,12].\n"
+                         "   %w - Weekday number [0(Sunday),6].\n"
+                         "   %y - Year without century [00,99].\n"
+                         "   %Y - Year with century.")
+    description_format_single = fields.Char(
+        string="Description Format Single Date",
+        help="Column description when 'from' and 'to' dates are the same.\n"
+             "Leave blank for default description.\n"
+             "For custom description enter the required description using"
+             "<<from>> and <<to>> to place the 'from' and/or 'to' dates. "
+             "e.g.:\n    From <<from>>")
+    description_format_range = fields.Char(
+        string="Description Format Date Range",
+        help="Column description when 'from' and 'to' dates are different.\n"
+             "Leave blank for default description.\n"
+             "For custom description enter the required description using"
+             "<<from>> and <<to>> to place the 'from' and/or 'to' dates. "
+             "e.g.:\n    From <<from>> to <<to>>")
     date = fields.Date(string='Base date',
                        help='Report base date '
                             '(leave empty to use current date)')
@@ -394,11 +424,16 @@ class MisReportInstance(models.Model):
         default['name'] = _('%s (copy)') % self.name
         return super(MisReportInstance, self).copy(default)
 
+    @api.multi
     def _format_date(self, date):
+        self.ensure_one()
+
         # format date following user language
-        lang_model = self.env['res.lang']
-        lang = lang_model._lang_get(self.env.user.lang)
-        date_format = lang.date_format
+        date_format = self.date_format
+        if not self.date_format:
+            lang_model = self.env['res.lang']
+            lang = lang_model._lang_get(self.env.user.lang)
+            date_format = lang.date_format
         return datetime.datetime.strftime(
             fields.Date.from_string(date), date_format)
 
@@ -563,6 +598,14 @@ class MisReportInstance(models.Model):
             return self._add_column_cmpcol(
                 aep, kpi_matrix, period, label, description)
 
+
+    @api.model
+    def _subst_description_dates(self, description_format, date_from, date_to):
+        description = description_format
+        for tag, val in (('<<from>>', date_from), ('<<to>>', date_to)):
+            description = description.replace(tag, val)
+        return description
+
     @api.multi
     def _compute_matrix(self):
         self.ensure_one()
@@ -570,14 +613,30 @@ class MisReportInstance(models.Model):
         kpi_matrix = self.report_id.prepare_kpi_matrix()
         for period in self.period_ids:
             description = None
+            date_from = period.date_from and \
+                        self._format_date(period.date_from) or \
+                        ''
+            date_to = period.date_to and \
+                      self._format_date(period.date_to) or \
+                      ''
             if period.mode == MODE_NONE:
                 pass
             elif period.date_from == period.date_to and period.date_from:
-                description = self._format_date(period.date_from)
+                if self.description_format_single:
+                    description = self._subst_description_dates(
+                                    self.description_format_single,
+                                    date_from,
+                                    date_to)
+                else:
+                    description = self._format_date(period.date_from)
             elif period.date_from and period.date_to:
-                date_from = self._format_date(period.date_from)
-                date_to = self._format_date(period.date_to)
-                description = _('from %s to %s') % (date_from, date_to)
+                if self.description_format_range:
+                    description = self._subst_description_dates(
+                                    self.description_format_range,
+                                    date_from,
+                                    date_to)
+                else:
+                    description = _('from %s to %s') % (date_from, date_to)
             self._add_column(aep, kpi_matrix, period, period.name, description)
         kpi_matrix.compute_comparisons()
         kpi_matrix.compute_sums()
